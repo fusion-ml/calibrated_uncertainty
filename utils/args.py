@@ -78,6 +78,8 @@ def parse_args():
     """ set model type """
     if args.model_type == 'vanilla':
         args.model = vanilla_nn
+    elif args.model_type == 'pnn':
+        args.model = prob_nn
 
     """ Set dataset method """
     if args.dataset == 'sine1':

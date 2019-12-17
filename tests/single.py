@@ -14,11 +14,6 @@ sys.path.append('../')
 from models.model import *
 from utils.args import *
 
-def main():
-    args, device = parse_args()
-    train(args, device)
-
-
 def train(args, device):
     max_epochs = args.num_epoch
     """ set data """
@@ -39,7 +34,7 @@ def train(args, device):
     test_gen = DataLoader(test_set, **args.test_data_params)
 
     """ set model """
-    model = args.model(input_size=1, output_size=1, hidden_size=args.hidden)
+    model = args.model(input_size=1, hidden_size=args.hidden)
     model = model.float()
 
     """ set optimizer and loss """
@@ -73,6 +68,10 @@ def train(args, device):
             plt.plot(test_X.numpy(), pred.numpy())
             plt.plot(test_X.numpy(), test_y.numpy())
         plt.show()
+
+def main():
+    args, device = parse_args()
+    train(args, device)
 
 
 if __name__=="__main__":

@@ -5,6 +5,7 @@ import torch.nn.init as init
 from torch.nn.parameter import Parameter
 from torch.nn.utils import weight_norm
 from torch.autograd import Variable
+import numpy as np
 
 
 class LinearLayer(nn.Module):
@@ -87,6 +88,52 @@ class vanilla_nn(nn.Module):
             out = X
 
         return out
+
+class prob_nn(nn.Module):
+    def __init__(self, input_size=1, output_size=2, bias=True,
+                 hidden_size=400, num_layers=4,
+                 use_bn=False, actv_type='relu',
+                 softmax=False):
+
+        super(prob_nn, self).__init__()
+        self.softmax = softmax
+        # self.loss = nn.MSELoss()
+        self.mean_dim = output_size
+
+        self.fcs = nn.ModuleList()
+        self.fcs.append(LinearLayer(input_size, hidden_size, bias,
+                                    use_bn=use_bn, actv_type=actv_type))
+        for _ in range(num_layers-2):
+            self.fcs.append(LinearLayer(hidden_size, hidden_size, bias,
+                                        use_bn=use_bn, actv_type=actv_type))
+        self.fcs.append(LinearLayer(hidden_size, output_size, bias,
+                                    use_bn=False, actv_type=None))
+
+
+
+    def loss(self, batch_pred, batch_y):
+        import pdb; pdb.set_trace()
+        pred_mean = batch_pred[:,:self.mean_dim]
+        pred_var = batch_pred[:,self.mean_dim:]
+
+        term_1 = torch.log(pred_var)/2
+        term_2 = (batch_y - pred_mean)**2/(2*pred_var)
+
+        loss = torch.mean(term_1 + term_2, axis=0)
+
+        return loss
+
+    def forward(self, X):
+        for layer in self.fcs:
+            X = layer(X)
+
+        if self.softmax:
+            out = F.softmax(X, dim=1)
+        else:
+            out = X
+
+        return out
+
 
 
 
