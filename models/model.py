@@ -5,7 +5,6 @@ import torch.nn.init as init
 from torch.nn.parameter import Parameter
 from torch.nn.utils import weight_norm
 from torch.autograd import Variable
-import numpy as np
 
 
 class LinearLayer(nn.Module):
@@ -98,7 +97,7 @@ class prob_nn(nn.Module):
         super(prob_nn, self).__init__()
         self.softmax = softmax
         # self.loss = nn.MSELoss()
-        self.mean_dim = output_size
+        self.mean_dim = 1
 
         self.fcs = nn.ModuleList()
         self.fcs.append(LinearLayer(input_size, hidden_size, bias,
@@ -108,18 +107,37 @@ class prob_nn(nn.Module):
                                         use_bn=use_bn, actv_type=actv_type))
         self.fcs.append(LinearLayer(hidden_size, output_size, bias,
                                     use_bn=False, actv_type=None))
+        self.max_var = 0
+        self.min_var = float('inf')
 
+    def softplus(self, x):
+        softplus = torch.log(1+torch.exp(x))
+        softplus = torch.where(softplus == float('inf'), x, softplus)
+        return softplus
 
 
     def loss(self, batch_pred, batch_y):
-        import pdb; pdb.set_trace()
-        pred_mean = batch_pred[:,:self.mean_dim]
-        pred_var = batch_pred[:,self.mean_dim:]
+        # import pdb; pdb.set_trace()
+        pred_mean, pred_var = torch.split(batch_pred, self.mean_dim, dim=1)
+        # pred_mean = batch_pred[:,:self.mean_dim]
+        # pred_var = batch_pred[:,self.mean_dim:]
 
-        term_1 = torch.log(pred_var)/2
-        term_2 = (batch_y - pred_mean)**2/(2*pred_var)
+        diff = torch.sub(batch_y, pred_mean)
+        var = self.softplus(pred_var)
+        for v in var:
+            if v == float('inf'):
+                raise ValueError('infinite variance')
+            if v > self.max_var:
+                self.max_var = v
+            if v < self.min_var:
+                self.min_var = v
+        loss = torch.mean(torch.div(diff**2, var))
+        loss += torch.mean(torch.log(var))
 
-        loss = torch.mean(term_1 + term_2, axis=0)
+        # pred_var = torch.clamp(pred_var, min=1e-10)
+        # term_1 = torch.log(pred_var)/2
+        # term_2 = (batch_y - pred_mean)**2/(2*pred_var)
+        # loss = torch.mean(term_1 + term_2, dim=0)
 
         return loss
 

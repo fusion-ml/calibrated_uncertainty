@@ -58,14 +58,23 @@ def train(args, device):
 
         print('Epoch {} finished'.format(epoch))
 
+    import pdb; pdb.set_trace()
     """ testing """
     with torch.no_grad():
         for data in test_gen:
             test_X, test_y = data
             test_X, test_y = test_X.float(), test_y.float()
 
-            pred = model(test_X)
-            plt.plot(test_X.numpy(), pred.numpy())
+            if args.model_type == 'vanilla':
+                pred = model(test_X)
+                plt.plot(test_X.numpy(), pred.numpy())
+            elif args.model_type == 'pnn':
+                pred = model(test_X)
+
+                pred_mean = pred[:, :model.mean_dim].numpy()
+                pred_var = pred[:, model.mean_dim].numpy()
+                pred_std = np.std(pred_var)
+                plt.errorbar(test_X.numpy(), y=pred_mean, yerr=pred_std)
             plt.plot(test_X.numpy(), test_y.numpy())
         plt.show()
 
