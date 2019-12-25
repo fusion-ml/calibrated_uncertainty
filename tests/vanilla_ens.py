@@ -10,8 +10,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import sys, random
 sys.path.append('../')
-from utils.args import *
+from utils.args import parse_args
 
+LINESKIP = "="*10+'\n'
 
 def train(args, device):
     max_epochs = args.num_epoch
@@ -78,6 +79,14 @@ def train(args, device):
         plt.axvline(args.train_max, c='k')
         plt.legend()
         plt.show()
+
+    print(LINESKIP)
+    import pdb; pdb.set_trace()
+    for ens_idx in range(len(model_ens)):
+        torch.save(model_ens[ens_idx].state_dict(),
+                   './saved_weights/model_{}.pt'.format(ens_idx))
+
+
 
 def main():
     args, device = parse_args()
