@@ -5,12 +5,14 @@ from torch.nn.utils import weight_norm
 import torch.optim as optim
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
+import torch.nn.init as init
 
 import numpy as np
 import matplotlib.pyplot as plt
 import sys, copy, random
 sys.path.append('../')
-from utils.args import *
+from utils.args import parse_args
+from utils.sensitivity import weight_sensitivity_analysis
 
 LINESKIP = "="*10+'\n'
 
@@ -18,7 +20,6 @@ LINESKIP = "="*10+'\n'
 def train(args, device):
     max_epochs = args.num_epoch
     use_bias = bool(args.bias)
-
     """ set data """
     train_set = args.dataset_method(x_min=args.train_min,
                                     x_max=args.train_max,
@@ -27,9 +28,6 @@ def train(args, device):
                                     mean=args.train_mu,
                                     std=args.train_sigma)
     train_gen = DataLoader(train_set, **args.train_data_params)
-    print('Training dataset: {}, min {}, max {}'.format(len(train_set),
-                                                        args.train_min,
-                                                        args.train_max))
 
     test_set = args.dataset_method(x_min=args.test_min,
                                    x_max=args.test_max,
@@ -38,37 +36,21 @@ def train(args, device):
                                    mean=args.test_mu,
                                    std=args.test_sigma)
     test_gen = DataLoader(test_set, **args.test_data_params)
-    print('Testing dataset: {}, min {}, max {}'.format(len(test_set),
-                                                        args.test_min,
-                                                        args.test_max))
-
-    """ OOD dataset """
-    OOD_size = 100
-    custom_x = np.concatenate([np.linspace(args.train_min-3, args.train_min, OOD_size // 2),
-                               np.linspace(args.train_max, args.train_max + 3, OOD_size // 2)])
-    OOD_set = args.dataset_method(size=args.test_size,
-                                  distr=args.test_distr,
-                                  custom_x=custom_x,
-                                  mean=args.test_mu,
-                                  std=args.test_sigma)
-    OOD_gen = DataLoader(OOD_set, **args.train_data_params)
-    print('OOD dataset: {}, min {}, max {}'.format(len(OOD_set),
-                                                       np.min(custom_x),
-                                                       np.max(custom_x)))
-    import pdb; pdb.set_trace()
-
 
     """ set model """
     parent_model = args.model(bias=use_bias,
                               num_layers=args.num_layers,
                               hidden_size=args.hidden).float()
-
+    # model_ens = [args.model(hidden_size=args.hidden).float()
+    #              for _ in range(args.num_ens)]
 
     """ set optimizer and loss """
     criterion = parent_model.loss
     parent_optimizer = optim.Adam(parent_model.parameters(), lr=args.lr)
+    # optimizers = [optim.Adam(ens_member.parameters(), lr=args.lr)
+    #               for ens_member in model_ens]
 
-    """ begin training parent model """
+    """ begin training parent """
     for epoch in range(max_epochs):
         for batch_idx, batch_data in enumerate(train_gen):
             batch_X, batch_y = batch_data
@@ -83,42 +65,45 @@ def train(args, device):
             # print(loss.item())
         print('Epoch {} finished'.format(epoch))
 
+    import pdb;
+    pdb.set_trace()
+    sens_data = next(iter(train_gen))[0].float()
+    layer_sensitivities = weight_sensitivity_analysis(parent_model, sens_data)
+    layer_sens_idx = np.array(layer_sensitivities).argsort()[::-1][:args.num_ens]
+
     """ set each ensemble member """
     # parent_weights = parent_model.parameters()
     stride = 2 if use_bias else 1
     # stride = 1
 
-    num_ens = int(args.num_layers * 2 / stride)
+    # num_ens = int(args.num_layers * 2 / stride)
+    num_ens = args.num_ens
     model_ens = []
-    children_params = []
+    optimizers = []
 
     for ens_idx in range(num_ens):
         """ copy parent to child """
         child_model = copy.deepcopy(parent_model)
 
+        """ set layer to unfreeze """
+        unfreeze_idx = layer_sens_idx[ens_idx]
         """ freeze all the weights of child"""
         for param in child_model.parameters():
             param.requires_grad = False
 
         child_params = list(child_model.parameters())
-        for layer_elem in range(stride):
-            unfreeze_idx = (ens_idx*stride) + layer_elem
-            print(unfreeze_idx, ens_idx, stride, layer_elem)
-            child_params[unfreeze_idx].requires_grad = True
-            # list(child_model.fcs)[unfreeze_idx//2].reset_parameters(reset_indv_bias=(unfreeze_idx%2==1))
-        list(child_model.fcs)[ens_idx].reset_parameters()
+        child_params[unfreeze_idx].requires_grad = True
+
+
+        init.xavier_uniform_(child_params[unfreeze_idx], gain=1.0)
         for x in child_model.fcs.parameters():
             print(x.requires_grad)
         print(LINESKIP)
-        """ add child to ens """
         model_ens.append(child_model)
-        children_params.extend(list(child_model.parameters()))
-    print('Finished populating ensemble')
-
-    """ set optimizer for children """
-    children_optimizer = optim.Adam(children_params, lr=args.lr)
+        optimizers.append(optim.Adam(child_model.parameters(), lr=args.lr))
 
     """ check that each sparse layer is initialized and different """
+    print('Finished populating ensemble')
     for comp_ens_idx in range(num_ens-1):
         print('Comparing members {} and {}'.format(comp_ens_idx, comp_ens_idx+1))
         for param_idx in range(args.num_layers * 2):
@@ -133,33 +118,18 @@ def train(args, device):
     """ train each ensemble member """
     for epoch in range(max_epochs):
         for batch_idx, batch_data in enumerate(train_gen):
-            # pdb.set_trace()
             batch_X, batch_y = batch_data
-            batch_X, batch_y = (batch_X.float()).to(device), (batch_y.float()).to(device)
-
-            OOD_data = next(iter(OOD_gen))
-            OOD_X, OOD_y = OOD_data
-            OOD_X, OOD_y = (OOD_X.float()).to(device), (OOD_y.float()).to(device)
-
-            children_optimizer.zero_grad()
-
-            in_loss_list = []
-            OOD_pred_list = []
+            batch_X, batch_y = batch_X.float(), batch_y.float()
+            batch_X, batch_y = batch_X.to(device), batch_y.to(device)
             for ens_idx in range(len(model_ens)):
+                optimizers[ens_idx].zero_grad()
+
                 batch_pred = model_ens[ens_idx](batch_X)
-                in_loss_list.append(criterion(batch_pred, batch_y))
-
-                OOD_pred_list.append(model_ens[ens_idx](OOD_X))
-
-            in_loss = torch.mean(torch.stack(in_loss_list))
-            OOD_loss = torch.mean(torch.var(torch.cat(OOD_pred_list, dim=1), dim=1))
-
-            loss = in_loss - args.ood*OOD_loss
-            loss.backward()
-            children_optimizer.step()
+                loss = criterion(batch_pred, batch_y)
+                loss.backward()
+                optimizers[ens_idx].step()
             # print(loss.item())
         print('Epoch {} finished'.format(epoch))
-
 
     """ check that ens is sparse """
     print('Finished training each ensemble member')
@@ -174,6 +144,7 @@ def train(args, device):
                 print('param {} is NOT the same'.format(param_idx))
         print(LINESKIP)
 
+    import pdb; pdb.set_trace()
 
     """ testing """
     with torch.no_grad():

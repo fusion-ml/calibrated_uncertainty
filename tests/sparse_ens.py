@@ -10,7 +10,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import sys, copy, random
 sys.path.append('../')
-from utils.args import *
+from utils.args import parse_args
 
 LINESKIP = "="*10+'\n'
 
@@ -134,6 +134,7 @@ def train(args, device):
                 print('param {} is NOT the same'.format(param_idx))
         print(LINESKIP)
 
+    import pdb; pdb.set_trace()
 
     """ testing """
     with torch.no_grad():
