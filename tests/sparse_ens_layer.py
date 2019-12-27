@@ -94,8 +94,11 @@ def train(args, device):
         child_params = list(child_model.parameters())
         child_params[unfreeze_idx].requires_grad = True
 
-
-        init.xavier_uniform_(child_params[unfreeze_idx], gain=1.0)
+        print(child_params[unfreeze_idx].size())
+        if (len(list(child_params[unfreeze_idx].size()))) < 2:
+            init.constant_(child_params[unfreeze_idx], 0.0)
+        else:
+            init.xavier_uniform_(child_params[unfreeze_idx], gain=1.0)
         for x in child_model.fcs.parameters():
             print(x.requires_grad)
         print(LINESKIP)
