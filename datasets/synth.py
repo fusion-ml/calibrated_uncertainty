@@ -3,7 +3,8 @@ from scipy.stats import truncnorm
 from torch.utils.data import Dataset
 
 class oneD_synth(Dataset):
-    def __init__(self, x_min=-1.0, x_max=1.0, size=int(1e5), distr='eq', mean=None, std=None, custom_x=None):
+    def __init__(self, x_min=-1.0, x_max=1.0, size=int(1e5), distr='eq',
+                 mean=None, std=None, custom_x=None):
         """
         :param x_min:
         :param x_max:

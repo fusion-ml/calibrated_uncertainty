@@ -58,9 +58,9 @@ def parse_args():
                         help="standard deviation of oneD test data x")
     parser.add_argument('--test_distr', type=str, default='eq',
                         help="test dataset distribution")
-    parser.add_argument('--test_min', type=float, default=-8,
+    parser.add_argument('--test_min', type=float, default=-5,
                         help="test dataset minimum x")
-    parser.add_argument('--test_max', type=float, default=8,
+    parser.add_argument('--test_max', type=float, default=5,
                         help="test dataset maximum x")
 
 
