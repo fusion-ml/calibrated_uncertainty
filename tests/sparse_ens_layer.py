@@ -65,8 +65,6 @@ def train(args, device):
             # print(loss.item())
         print('Epoch {} finished'.format(epoch))
 
-    import pdb;
-    pdb.set_trace()
     sens_data = next(iter(train_gen))[0].float()
     layer_sensitivities = weight_sensitivity_analysis(parent_model, sens_data)
     layer_sens_idx = np.array(layer_sensitivities).argsort()[::-1][:args.num_ens]
@@ -147,27 +145,29 @@ def train(args, device):
                 print('param {} is NOT the same'.format(param_idx))
         print(LINESKIP)
 
-    import pdb; pdb.set_trace()
-
     """ testing """
+    plt.figure(figsize=(5,4))
     with torch.no_grad():
         for data in test_gen:
             test_X, test_y = data
             test_X, test_y = test_X.float(), test_y.float()
 
-            import pdb; pdb.set_trace()
             pred_list = [ens_member(test_X).numpy() for ens_member in model_ens]
             preds = np.hstack(pred_list)
             pred_mean = np.mean(preds, axis=1)
             pred_std = np.std(preds, axis=1)
 
             for single_pred in pred_list:
-                plt.plot(test_X.numpy(), single_pred, c='k', linewidth=0.1)
-            plt.errorbar(test_X.numpy(), pred_mean, yerr=pred_std, label='preds')
-            plt.plot(test_X.numpy(), test_y.numpy(), label='GT')
-        plt.axvline(args.train_min, c='k')
-        plt.axvline(args.train_max, c='k')
+                plt.plot(test_X.numpy(), single_pred, c='k', linewidth=0.5)
+            plt.errorbar(test_X.numpy(), pred_mean, yerr=pred_std, label='Sparse Ensemble')
+            plt.plot(test_X.numpy(), test_y.numpy(), label='Ground Truth')
+        # plt.axvline(args.train_min, c='k')
+        # plt.axvline(args.train_max, c='k')
+        plt.xlabel('X')
+        plt.ylabel('y')
+
         plt.legend()
+        plt.savefig('figs/sparse_ens_{}.png'.format(args.dataset))
         plt.show()
 
 def main():

@@ -32,6 +32,10 @@ def parse_args():
     parser.add_argument('--ood', type=float, default=0.3,
                         help="ood loss term coefficient")
 
+    """ common data args """
+    parser.add_argument('--noise', type=int, default=0,
+                        help="add noise or not")
+
     """ train dataset """
     parser.add_argument('--batch', type=int, default=16,
                         help="training batch size")
