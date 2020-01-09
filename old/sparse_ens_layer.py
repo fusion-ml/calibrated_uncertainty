@@ -1,9 +1,5 @@
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.nn.utils import weight_norm
 import torch.optim as optim
-from torch.autograd import Variable
 from torch.utils.data import DataLoader
 import torch.nn.init as init
 
@@ -41,8 +37,6 @@ def train(args, device):
     parent_model = args.model(bias=use_bias,
                               num_layers=args.num_layers,
                               hidden_size=args.hidden).float()
-    # model_ens = [args.model(hidden_size=args.hidden).float()
-    #              for _ in range(args.num_ens)]
 
     """ set optimizer and loss """
     criterion = parent_model.loss
@@ -62,12 +56,17 @@ def train(args, device):
             loss = criterion(batch_pred, batch_y)
             loss.backward()
             parent_optimizer.step()
-            # print(loss.item())
         print('Epoch {} finished'.format(epoch))
 
-    sens_data = next(iter(train_gen))[0].float()
+
+    """ determine most sensitive layer """
+    full_train_gen = DataLoader(train_set, batch_size=len(train_set))
+    sens_data = next(iter(full_train_gen))[0].float()
     layer_sensitivities = weight_sensitivity_analysis(parent_model, sens_data)
+    """ either choose as many layers as ensembles to change """
     layer_sens_idx = np.array(layer_sensitivities).argsort()[::-1][:args.num_ens]
+    """ or choose just the most sensitive layer """
+    layer_sens_idx = np.repeat(np.argmax(layer_sensitivities), args.num_ens)
 
     """ set each ensemble member """
     # parent_weights = parent_model.parameters()
@@ -115,6 +114,7 @@ def train(args, device):
             else:
                 print('param {} is NOT the same'.format(param_idx))
         print(LINESKIP)
+    import pdb; pdb.set_trace()
 
     """ train each ensemble member """
     for epoch in range(max_epochs):
@@ -127,9 +127,12 @@ def train(args, device):
 
                 batch_pred = model_ens[ens_idx](batch_X)
                 loss = criterion(batch_pred, batch_y)
+                print(loss)
                 loss.backward()
                 optimizers[ens_idx].step()
+            import pdb; pdb.set_trace()
             # print(loss.item())
+
         print('Epoch {} finished'.format(epoch))
 
     """ check that ens is sparse """
@@ -144,6 +147,7 @@ def train(args, device):
             else:
                 print('param {} is NOT the same'.format(param_idx))
         print(LINESKIP)
+    import pdb; pdb.set_trace()
 
     """ testing """
     plt.figure(figsize=(5,4))
@@ -179,7 +183,6 @@ def main():
     torch.manual_seed(args.seed)
 
     train(args, device)
-
 
 
 if __name__=="__main__":

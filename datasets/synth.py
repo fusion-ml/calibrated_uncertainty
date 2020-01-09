@@ -29,18 +29,25 @@ class oneD_synth(Dataset):
             assert(custom_x is not None)
             self.x = np.array(custom_x).reshape(-1,1)
 
-    def gaussian_noise(self, X, std_1=1, std_2=0.5, std_3=0.5):
+    def gaussian_noise(self, X, std_1=1.0, std_2=3.0, std_3=0.5):
         if not self.noise:
             return 0
 
-        q_1, q_2, q_3 = np.quantile([np.min(self.x), np.max(self.x)], [0.25,0.5,0.75])
-        self.q_1, self.q_2, self.q_3 = q_1, q_2, q_3
-        if (X < q_1) or (X > q_3):
+        # q_1, q_2, q_3 = np.quantile([np.min(self.x), np.max(self.x)], [0.25,0.5,0.75])
+        # self.q_1, self.q_2, self.q_3 = q_1, q_2, q_3
+        # if (X < q_1) or (X > q_3):
+        #     return np.random.normal(0, std_1)
+        # elif (q_1 < X) and (X < q_2):
+        #     return np.random.normal(0, std_2)
+        # elif (q_2 < X) and (X < q_3):
+        #     return np.random.normal(0, std_3)
+
+        q_1 = np.quantile([np.min(self.x), np.max(self.x)], [0.5])
+        self.q_1 = q_1
+        if X < self.q_1:
             return np.random.normal(0, std_1)
-        elif (q_1 < X) and (X < q_2):
+        elif self.q_1 < X:
             return np.random.normal(0, std_2)
-        elif (q_2 < X) and (X < q_3):
-            return np.random.normal(0, std_3)
 
     def oneD_fn(self, X):
         raise NotImplementedError("Must implement 1D function")
