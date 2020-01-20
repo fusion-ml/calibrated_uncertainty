@@ -1,3 +1,8 @@
+"""
+Test script that sees if we can control the mean and spread of a vanilla ensemble:
+- vanilla ensemble
+- ensemble loss is distance of mean from 0, distance of std from 1
+"""
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

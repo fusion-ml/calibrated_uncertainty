@@ -8,8 +8,14 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     """ general args """
-    parser.add_argument('--num_epoch', type=int,
-                        default=10, help="number of epochs to train.")
+    parser.add_argument('--parent_ep', type=int, default=1000,
+                        help="max number of epochs to train for parent model")
+    parser.add_argument('--ens_ep', type=int, default=300,
+                        help="max number of epochs to train for ensemble")
+    parser.add_argument('--cali', type=int, default=1,
+                        help="use calibration loss")
+    parser.add_argument('--sharp', type=int, default=1,
+                        help="use sharpness loss")
 
 
     """ model args """
@@ -21,11 +27,11 @@ def parse_args():
                         help="1 to use bias in network weights")
     parser.add_argument('--num_layers', type=int, default=5,
                         help="number of layers in model")
-    parser.add_argument('--lr', type=float,
-                        default=0.1, help="learning rate.")
+    parser.add_argument('--lr', type=float, default=1e-3,
+                        help="learning rate.")
 
     """ ensemble args """
-    parser.add_argument('--num_ens', type=int, default=2,
+    parser.add_argument('--num_ens', type=int, default=5,
                         help="number of models in ensemble")
     parser.add_argument('--dataset', type=str, default='para1',
                         help="dataset to use")

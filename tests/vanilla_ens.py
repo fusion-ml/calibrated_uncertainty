@@ -1,3 +1,7 @@
+"""
+Vanilla ensemble in which:
+- ensemble loss is only MSE
+"""
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -34,7 +38,9 @@ def train(args, device):
     test_gen = DataLoader(test_set, **args.test_data_params)
 
     """ set model """
-    model_ens = [args.model(hidden_size=args.hidden).float()
+    model_ens = [args.model(bias=use_bias,
+                            num_layers=args.num_layers,
+                            hidden_size=args.hidden).float()
                  for _ in range(args.num_ens)]
 
     """ set optimizer and loss """

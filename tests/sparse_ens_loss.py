@@ -1,11 +1,18 @@
+"""
+Sparse ensemble in which:
+- sparse weights are chosen by either the most sensitive layer
+  or N most sensitive layers (N is the number of ensemble members
+- ensemble loss can be just MSE or MSE+sharp+cali
+"""
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
 import torch.nn.init as init
 
 import numpy as np
-import matplotlib.pyplot as plt
 import sys, copy, random
+from collections import deque
+
 sys.path.append('../')
 from utils.args import parse_args
 from utils.sensitivity import weight_sensitivity_analysis
@@ -16,15 +23,18 @@ LINESKIP = "="*10+'\n'
 
 
 def train(args, device):
-    max_epochs = args.num_epoch
     use_bias = bool(args.bias)
+    use_cali = bool(args.cali)
+    use_sharp = bool(args.sharp)
+
     """ set data """
     train_set = args.dataset_method(x_min=args.train_min,
                                     x_max=args.train_max,
                                     size=args.train_size,
                                     distr=args.train_distr,
                                     mean=args.train_mu,
-                                    std=args.train_sigma)
+                                    std=args.train_sigma,
+                                    noise=bool(args.noise))
     train_gen = DataLoader(train_set, **args.train_data_params)
 
     test_set = args.dataset_method(x_min=args.test_min,
@@ -32,7 +42,8 @@ def train(args, device):
                                    size=args.test_size,
                                    distr=args.test_distr,
                                    mean=args.test_mu,
-                                   std=args.test_sigma)
+                                   std=args.test_sigma,
+                                   noise=bool(args.noise))
     test_gen = DataLoader(test_set, **args.test_data_params)
 
     """ set model """
@@ -47,7 +58,9 @@ def train(args, device):
     #               for ens_member in model_ens]
 
     """ begin training parent """
-    for epoch in range(max_epochs):
+    running_loss = deque(maxlen=10)
+    parent_lr_thresh = False
+    for epoch in range(args.parent_ep):
         for batch_idx, batch_data in enumerate(train_gen):
             batch_X, batch_y = batch_data
             batch_X, batch_y = batch_X.float(), batch_y.float()
@@ -56,9 +69,23 @@ def train(args, device):
 
             batch_pred = parent_model(batch_X)
             loss = criterion(batch_pred, batch_y)
+            running_loss.append(loss.detach().item())
             loss.backward()
             parent_optimizer.step()
-        print('Epoch {} finished, loss: {}'.format(epoch, loss.item()))
+
+        if epoch % 25 == 0:
+            print('Epoch {}: running loss {}'.format(epoch, np.mean(running_loss)))
+            avg_running_loss = np.mean(running_loss)
+            """ lr decay """
+            if (avg_running_loss < 0.5) and (not parent_lr_thresh):
+                print('Setting parent lr thresh 1')
+                parent_lr_thresh = True
+                for param_group in parent_optimizer.param_groups:
+                    param_group['lr'] = 0.005
+            """ breaking condition """
+            if avg_running_loss < 1e-3:
+                break
+    import pdb; pdb.set_trace()
 
 
     """ determine most sensitive layer """
@@ -71,7 +98,6 @@ def train(args, device):
     layer_sens_idx = np.repeat(np.argmax(layer_sensitivities), args.num_ens)
 
     """ set each ensemble member """
-    # num_ens = int(args.num_layers * 2 / stride)
     num_ens = args.num_ens
     model_ens = []
     optimizers = []
@@ -99,9 +125,9 @@ def train(args, device):
         print(LINESKIP)
         model_ens.append(child_model)
         optimizers.append(optim.Adam(child_model.parameters(), lr=args.lr))
-
-    """ check that each sparse layer is initialized and different """
     print('Finished populating ensemble')
+
+    ### BEGIN: check that each sparse layer is initialized and different
     for comp_ens_idx in range(num_ens-1):
         print('Comparing members {} and {}'.format(comp_ens_idx, comp_ens_idx+1))
         for param_idx in range(args.num_layers * 2):
@@ -113,9 +139,14 @@ def train(args, device):
                 print('param {} is NOT the same'.format(param_idx))
         print(LINESKIP)
     import pdb; pdb.set_trace()
+    ### END: check
 
     """ train each ensemble member """
-    for epoch in range(max_epochs):
+    running_loss = deque(maxlen=10)
+    lr_thresh_1 = False
+    lr_thresh_2 = False
+    lr_thresh_3 = False
+    for epoch in range(args.ens_ep):
         for batch_idx, batch_data in enumerate(train_gen):
             batch_X, batch_y = batch_data
             batch_X, batch_y = batch_X.float(), batch_y.float()
@@ -134,23 +165,60 @@ def train(args, device):
 
             """ criterion loss """
             concat_pred_loss = torch.cat(pred_loss)
+            loss = torch.mean(concat_pred_loss)
+
             """ calibration loss """
-            cali_mean_loss, cali_std_loss = calibration_loss(ens_preds, batch_y)
+            if use_cali:
+                cali_mean_loss, cali_std_loss = calibration_loss(
+                    ens_preds, batch_y)
+                loss = loss + cali_mean_loss + cali_std_loss
             """ sharpness loss """
-            sharp_loss = sharpness_loss(ens_preds)
-            loss = (
-                    torch.mean(concat_pred_loss)
-                    + cali_mean_loss
-                    + cali_std_loss
-                    + sharp_loss
-            )
+            if use_sharp:
+                sharp_loss = sharpness_loss(ens_preds)
+                loss = loss + sharp_loss
+
+            # loss = (
+            #         torch.mean(concat_pred_loss)
+            #         + cali_mean_loss
+            #         + cali_std_loss
+            #         + sharp_loss
+            # )
+            running_loss.append(loss.detach().item())
             loss.backward()
             for ens_idx in range(len(model_ens)):
                 optimizers[ens_idx].step()
-        if epoch % 25 == 0:
-            print('Epoch {} finished, loss: {}'.format(epoch, loss.item()))
 
-    """ check that ens is sparse """
+        if epoch % 25 == 0:
+            print('Epoch {}: running loss {}'.format(epoch, np.mean(running_loss)))
+            print('calis:{:.2f}, {:.2f}'.format(cali_mean_loss.item(),
+                                                cali_std_loss.item()))
+            avg_running_loss = np.mean(running_loss)
+            """ lr decay """
+            if (avg_running_loss < 60) and (not lr_thresh_1):
+                print('Setting lr thresh 1')
+                for ens_idx in range(args.num_ens):
+                    for param_group in optimizers[ens_idx].param_groups:
+                        lr_thresh_1 = True
+                        param_group['lr'] = 0.05
+            if (avg_running_loss < 30) and (not lr_thresh_2):
+                print('Setting lr thresh 2')
+                for ens_idx in range(args.num_ens):
+                    for param_group in optimizers[ens_idx].param_groups:
+                        lr_thresh_2 = True
+                        param_group['lr'] = 0.01
+            if (avg_running_loss < 15) and (not lr_thresh_3):
+                print('Setting lr thresh 3')
+                for ens_idx in range(args.num_ens):
+                    for param_group in optimizers[ens_idx].param_groups:
+                        lr_thresh_3 = True
+                        param_group['lr'] = 0.0005
+            """ breaking condition """
+            if (avg_running_loss < 10) \
+                    and (cali_mean_loss.item() < 0.03) \
+                    and (cali_std_loss.item() < 0.03):
+                break
+
+    ### BEGIN: check that ens is sparse
     print('Finished training each ensemble member')
     for comp_ens_idx in range(num_ens - 1):
         print('Comparing members {} and {}'.format(comp_ens_idx, comp_ens_idx+1))
@@ -163,9 +231,9 @@ def train(args, device):
                 print('param {} is NOT the same'.format(param_idx))
         print(LINESKIP)
     import pdb; pdb.set_trace()
+    ### END: check
 
-
-    """ testing """
+    """ testing and plotting """
     ens_plot_all(train_set, test_gen, model_ens)
 
     # """ testing """
@@ -201,6 +269,7 @@ def main():
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
 
+    """ train and test """
     train(args, device)
 
 

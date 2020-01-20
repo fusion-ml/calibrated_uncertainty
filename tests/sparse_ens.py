@@ -1,3 +1,8 @@
+"""
+Sparse ensemble in which:
+- sparse weights are chosen by iterating the layers
+- ensemble loss is only MSE
+"""
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -9,14 +14,15 @@ from torch.utils.data import DataLoader
 import numpy as np
 import matplotlib.pyplot as plt
 import sys, copy, random
+from collections import deque
 sys.path.append('../')
 from utils.args import parse_args
+from utils.test_plots import ens_plot_all
 
 LINESKIP = "="*10+'\n'
 
 
 def train(args, device):
-    max_epochs = args.num_epoch
     use_bias = bool(args.bias)
     """ set data """
     train_set = args.dataset_method(x_min=args.train_min,
@@ -39,8 +45,6 @@ def train(args, device):
     parent_model = args.model(bias=use_bias,
                               num_layers=args.num_layers,
                               hidden_size=args.hidden).float()
-    # model_ens = [args.model(hidden_size=args.hidden).float()
-    #              for _ in range(args.num_ens)]
 
     """ set optimizer and loss """
     criterion = parent_model.loss
@@ -49,7 +53,8 @@ def train(args, device):
     #               for ens_member in model_ens]
 
     """ begin training parent """
-    for epoch in range(max_epochs):
+    running_loss = deque(maxlen=10)
+    for epoch in range(args.parent_ep):
         for batch_idx, batch_data in enumerate(train_gen):
             batch_X, batch_y = batch_data
             batch_X, batch_y = batch_X.float(), batch_y.float()
@@ -58,10 +63,22 @@ def train(args, device):
 
             batch_pred = parent_model(batch_X)
             loss = criterion(batch_pred, batch_y)
+            running_loss.append(loss.detach().item())
             loss.backward()
             parent_optimizer.step()
-            # print(loss.item())
-        print('Epoch {} finished'.format(epoch))
+
+        if epoch % 25 == 0:
+            print('Epoch {}: running loss {}'.format(epoch, np.mean(running_loss)))
+            avg_running_loss = np.mean(running_loss)
+            """ lr decay """
+            if avg_running_loss < 0.5:
+                for param_group in parent_optimizer.param_groups:
+                    param_group['lr'] = 0.005
+            """ breaking condition """
+            if avg_running_loss < 1e-3:
+                break
+    import pdb; pdb.set_trace()
+
 
     """ set each ensemble member """
     # parent_weights = parent_model.parameters()
@@ -106,7 +123,7 @@ def train(args, device):
         print(LINESKIP)
 
     """ train each ensemble member """
-    for epoch in range(max_epochs):
+    for epoch in range(args.ens_ep):
         for batch_idx, batch_data in enumerate(train_gen):
             batch_X, batch_y = batch_data
             batch_X, batch_y = batch_X.float(), batch_y.float()
@@ -137,25 +154,26 @@ def train(args, device):
     import pdb; pdb.set_trace()
 
     """ testing """
-    with torch.no_grad():
-        for data in test_gen:
-            test_X, test_y = data
-            test_X, test_y = test_X.float(), test_y.float()
-
-            import pdb; pdb.set_trace()
-            pred_list = [ens_member(test_X).numpy() for ens_member in model_ens]
-            preds = np.hstack(pred_list)
-            pred_mean = np.mean(preds, axis=1)
-            pred_std = np.std(preds, axis=1)
-
-            for single_pred in pred_list:
-                plt.plot(test_X.numpy(), single_pred, c='k', linewidth=0.1)
-            plt.errorbar(test_X.numpy(), pred_mean, yerr=pred_std, label='preds')
-            plt.plot(test_X.numpy(), test_y.numpy(), label='GT')
-        plt.axvline(args.train_min, c='k')
-        plt.axvline(args.train_max, c='k')
-        plt.legend()
-        plt.show()
+    ens_plot_all(train_set, test_gen, model_ens)
+    # with torch.no_grad():
+    #     for data in test_gen:
+    #         test_X, test_y = data
+    #         test_X, test_y = test_X.float(), test_y.float()
+    #
+    #         import pdb; pdb.set_trace()
+    #         pred_list = [ens_member(test_X).numpy() for ens_member in model_ens]
+    #         preds = np.hstack(pred_list)
+    #         pred_mean = np.mean(preds, axis=1)
+    #         pred_std = np.std(preds, axis=1)
+    #
+    #         for single_pred in pred_list:
+    #             plt.plot(test_X.numpy(), single_pred, c='k', linewidth=0.1)
+    #         plt.errorbar(test_X.numpy(), pred_mean, yerr=pred_std, label='preds')
+    #         plt.plot(test_X.numpy(), test_y.numpy(), label='GT')
+    #     plt.axvline(args.train_min, c='k')
+    #     plt.axvline(args.train_max, c='k')
+    #     plt.legend()
+    #     plt.show()
 
 def main():
     args, device = parse_args()

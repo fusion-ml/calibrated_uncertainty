@@ -1,3 +1,9 @@
+"""
+Single model:
+  train and test either a single deterministic network
+  or a probabilistic network
+"""
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -7,15 +13,16 @@ from torch.autograd import Variable
 from torch.utils.data import DataLoader
 
 import numpy as np
+from _collections import deque
 import matplotlib.pyplot as plt
 import sys
 
 sys.path.append('../')
 from models.model import *
-from utils.args import *
+from utils.args import parse_args
+from utils.test_plots import train_plot
 
 def train(args, device):
-    max_epochs = args.num_epoch
     """ set data """
     train_set = args.dataset_method(x_min=args.train_min,
                                     x_max=args.train_max,
@@ -42,7 +49,8 @@ def train(args, device):
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
     """ begin training """
-    for epoch in range(max_epochs):
+    running_loss = deque(maxlen=10)
+    for epoch in range(args.parent_ep):
         for batch_idx, batch_data in enumerate(train_gen):
             batch_X, batch_y = batch_data
             batch_X, batch_y = batch_X.float(), batch_y.float()
@@ -52,13 +60,25 @@ def train(args, device):
 
             batch_pred = model(batch_X)
             loss = criterion(batch_pred, batch_y)
+            running_loss.append(loss.detach().item())
             loss.backward()
             optimizer.step()
-            print(loss.item())
 
-        print('Epoch {} finished'.format(epoch))
-
+        if epoch % 25 == 0:
+            print('Epoch {}: running loss {}'.format(epoch, np.mean(running_loss)))
+            avg_running_loss = np.mean(running_loss)
+            """ lr decay """
+            if avg_running_loss < 0.5:
+                for param_group in optimizer.param_groups:
+                    param_group['lr'] = 0.005
+            """ breaking condition """
+            if avg_running_loss < 1e-3:
+                break
     import pdb; pdb.set_trace()
+
+    """ plot result of training """
+    train_plot(train_set, model)
+
     """ testing """
     with torch.no_grad():
         for data in test_gen:

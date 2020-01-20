@@ -1,3 +1,8 @@
+"""
+Vanilla ensemble in which:
+- ensemble loss can be just MSE or MSE+sharp+cali
+"""
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -7,18 +12,21 @@ from torch.autograd import Variable
 from torch.utils.data import DataLoader
 
 import numpy as np
-import matplotlib.pyplot as plt
 import sys, random
+from collections import deque
 sys.path.append('../')
 from utils.args import parse_args
-from utils import calibrate as cali
 from models.losses import calibration_loss, sharpness_loss
 from utils.test_plots import ens_plot_all
 
 LINESKIP = "="*10+'\n'
 
 def train(args, device):
-    max_epochs = args.num_epoch
+    use_bias = bool(args.bias)
+    use_cali = bool(args.cali)
+    use_sharp = bool(args.sharp)
+    # use_sharp = False
+
     """ set data """
     train_set = args.dataset_method(x_min=args.train_min,
                                     x_max=args.train_max,
@@ -39,7 +47,9 @@ def train(args, device):
     test_gen = DataLoader(test_set, **args.test_data_params)
 
     """ set model """
-    model_ens = [args.model(hidden_size=args.hidden).float()
+    model_ens = [args.model(bias=use_bias,
+                            num_layers=args.num_layers,
+                            hidden_size=args.hidden).float()
                  for _ in range(args.num_ens)]
 
     """ set optimizer and loss """
@@ -49,7 +59,11 @@ def train(args, device):
 
     # import pdb; pdb.set_trace()
     """ begin training """
-    for epoch in range(max_epochs):
+    running_loss = deque(maxlen=10)
+    lr_thresh_1 = False
+    lr_thresh_2 = False
+    lr_thresh_3 = False
+    for epoch in range(args.ens_ep):
         for batch_idx, batch_data in enumerate(train_gen):
             batch_X, batch_y = batch_data
             batch_X, batch_y = batch_X.float(), batch_y.float()
@@ -65,20 +79,34 @@ def train(args, device):
                 pred_loss.append(
                     torch.unsqueeze(criterion(batch_pred, batch_y), dim=-1))
 
-            """ criterion loss"""
+            """ criterion loss """
             concat_pred_loss = torch.cat(pred_loss)
-            """ calibration loss """
-            cali_mean_loss, cali_std_loss = calibration_loss(ens_preds, batch_y)
-            """ sharpness loss """
-            sharp_loss = sharpness_loss(ens_preds)
+            loss = torch.mean(concat_pred_loss)
 
-            # print('DEBUG {}, {}, {}'.format(cali_mean_loss, cali_std_loss, sharp_loss))
-            loss = (
-                torch.mean(concat_pred_loss)
-                + cali_mean_loss
-                + cali_std_loss
-                + sharp_loss
-            )
+            """ calibration loss """
+            if use_cali:
+                cali_mean_loss, cali_std_loss = calibration_loss(
+                    ens_preds, batch_y)
+                loss = loss + cali_mean_loss + cali_std_loss
+            """ sharpness loss """
+            if use_sharp:
+                sharp_loss = sharpness_loss(ens_preds)
+                loss = loss + 0.5*sharp_loss
+
+            # """ criterion loss"""
+            # concat_pred_loss = torch.cat(pred_loss)
+            # """ calibration loss """
+            # cali_mean_loss, cali_std_loss = calibration_loss(ens_preds, batch_y)
+            # """ sharpness loss """
+            # sharp_loss = sharpness_loss(ens_preds)
+            #
+            # # print('DEBUG {}, {}, {}'.format(cali_mean_loss, cali_std_loss, sharp_loss))
+            # loss = (
+            #     torch.mean(concat_pred_loss)
+            #     + cali_mean_loss
+            #     + cali_std_loss
+            #     + sharp_loss
+            # )
 
 
             # concat_preds = torch.cat(ens_preds, dim=1)
@@ -102,13 +130,40 @@ def train(args, device):
             # )
             #
             # print('DEBUG {}, {}, {}'.format(mean_z_score_loss, std_z_score_loss, torch.mean(pred_stds)))
-
+            running_loss.append(loss.detach().item())
             loss.backward()
             for ens_idx in range(args.num_ens):
                 optimizers[ens_idx].step()
-        if epoch % 25 == 0:
-            print(loss.item())
 
+        if epoch % 25 == 0:
+            print('Epoch {}: running loss {}'.format(epoch, np.mean(running_loss)))
+            print('calis:{:.2f}, {:.2f}'.format(cali_mean_loss.item(),
+cali_std_loss.item()))
+            avg_running_loss = np.mean(running_loss)
+            """ lr decay """
+            if (avg_running_loss < 60) and (not lr_thresh_1):
+                print('Setting lr thresh 1')
+                for ens_idx in range(args.num_ens):
+                    for param_group in optimizers[ens_idx].param_groups:
+                        lr_thresh_1 = True
+                        param_group['lr'] = 0.05
+            if (avg_running_loss < 30) and (not lr_thresh_2):
+                print('Setting lr thresh 2')
+                for ens_idx in range(args.num_ens):
+                    for param_group in optimizers[ens_idx].param_groups:
+                        lr_thresh_2 = True
+                        param_group['lr'] = 0.01
+            if (avg_running_loss < 15) and (not lr_thresh_3):
+                print('Setting lr thresh 3')
+                for ens_idx in range(args.num_ens):
+                    for param_group in optimizers[ens_idx].param_groups:
+                        lr_thresh_3 = True
+                        param_group['lr'] = 0.0005
+            """ breaking condition """
+            if (avg_running_loss < 10) \
+                and (cali_mean_loss.item() < 0.03) \
+                and (cali_std_loss.item() < 0.03):
+                break
         # print('Epoch {} finished'.format(epoch))
 
     # print(resid_z_scores)
