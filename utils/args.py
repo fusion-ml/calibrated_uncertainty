@@ -100,6 +100,8 @@ def parse_args():
         args.dataset_method = oneD_parabola
     elif args.dataset == 'cubed1':
         args.dataset_method = oneD_cubed
+    elif args.dataset == 'test1':
+        args.dataset_method = oneD_test_1
 
     """ set data params"""
     args.train_data_params = {'batch_size': args.batch, 'shuffle': True,

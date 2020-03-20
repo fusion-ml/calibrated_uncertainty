@@ -84,25 +84,25 @@ def ens_plot_all(train_set, test_gen, model_ens):
     plt.savefig('./figs/calibration.png')
     plt.show()
 
-    import pdb;
-    pdb.set_trace()
-    plt.clf()
-    plt.hist(test_residuals / test_pred_stds)
-    plt.ylabel('Proportion in test set')
-    plt.xlabel('Standardized Residuals')
-    plt.legend()
-    plt.savefig('./figs/resid_prop.png')
-    plt.show()
-
-    import pdb;
-    pdb.set_trace()
-    plt.clf()
-    plt.hist(test_pred_stds)
-    plt.ylabel('Proportions')
-    plt.xlabel('Predicted Test Standard Deviations')
-    plt.legend()
-    plt.savefig('./figs/stddev_prop.png')
-    plt.show()
+    # import pdb;
+    # pdb.set_trace()
+    # plt.clf()
+    # plt.hist(test_residuals / test_pred_stds)
+    # plt.ylabel('Proportion in test set')
+    # plt.xlabel('Standardized Residuals')
+    # plt.legend()
+    # plt.savefig('./figs/resid_prop.png')
+    # plt.show()
+    #
+    # import pdb;
+    # pdb.set_trace()
+    # plt.clf()
+    # plt.hist(test_pred_stds)
+    # plt.ylabel('Proportions')
+    # plt.xlabel('Predicted Test Standard Deviations')
+    # plt.legend()
+    # plt.savefig('./figs/stddev_prop.png')
+    # plt.show()
 
     import pdb;
     pdb.set_trace()

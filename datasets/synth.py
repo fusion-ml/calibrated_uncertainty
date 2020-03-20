@@ -29,7 +29,7 @@ class oneD_synth(Dataset):
             assert(custom_x is not None)
             self.x = np.array(custom_x).reshape(-1,1)
 
-    def gaussian_noise(self, X, std_1=1.0, std_2=3.0, std_3=0.5):
+    def gaussian_noise(self, X, std_1=1.0, std_2=5.0, std_3=0.5):
         if not self.noise:
             return 0
 
@@ -91,8 +91,14 @@ class oneD_parabola(oneD_synth):
     def oneD_fn(self, X):
         return self.quad*X**2 + self.lin*X + self.const
 
+class oneD_test_1(oneD_synth):
+    def oneD_fn(self, X):
+        return X*np.sin(X) + 0.3*np.random.normal(0, 1) + 0.3*X*np.random.normal(0, 1)
+
 if __name__=='__main__':
-    test_fn = oneD_parabola(size=1000, noise=True, distr='unif')
+    # test_fn = oneD_test_1(size=1000, noise=True, distr='unif')
+    test_fn = oneD_test_1(size=1000, noise=False, distr='unif',
+                          x_min=-4, x_max=14)
     batch_size=test_fn.__len__()
     dataloader = torch.utils.data.DataLoader(dataset=test_fn, batch_size=batch_size)
     X, y = next(iter(dataloader))
@@ -103,9 +109,9 @@ if __name__=='__main__':
     X_np = X_np[order]
     y_np = y.numpy()[order]
     import pdb; pdb.set_trace()
-    plt.plot(X_np, test_fn.oneD_fn(X_np), c='r')
-    plt.plot(X_np, y_np, '.')
-    plt.axvline(test_fn.q_1, c='k')
-    plt.axvline(test_fn.q_2, c='k')
-    plt.axvline(test_fn.q_3, c='k')
+    plt.plot(X_np, test_fn.oneD_fn(X_np), '--', c='r')
+    plt.plot(X_np, y_np, '.', markersize=1)
+    # plt.axvline(test_fn.q_1, c='k')
+    # plt.axvline(test_fn.q_2, c='k')
+    # plt.axvline(test_fn.q_3, c='k')
     plt.show()

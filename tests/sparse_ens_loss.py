@@ -27,6 +27,10 @@ def train(args, device):
     use_cali = bool(args.cali)
     use_sharp = bool(args.sharp)
 
+    ###BEGIN: set custom x
+    custom_x = np.concatenate([np.linspace(-5, -3, args.train_size//2),
+                              np.linspace(3, 5, args.train_size // 2)])
+    ###END: set custom x
     """ set data """
     train_set = args.dataset_method(x_min=args.train_min,
                                     x_max=args.train_max,
@@ -34,7 +38,8 @@ def train(args, device):
                                     distr=args.train_distr,
                                     mean=args.train_mu,
                                     std=args.train_sigma,
-                                    noise=bool(args.noise))
+                                    noise=bool(args.noise),
+                                    custom_x=custom_x)
     train_gen = DataLoader(train_set, **args.train_data_params)
 
     test_set = args.dataset_method(x_min=args.test_min,
