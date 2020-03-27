@@ -1,0 +1,4 @@
+1) same exp, better looking plots
+2) separated domains
+3) histogram of std's (like the other paper)
+

@@ -77,6 +77,7 @@ class vanilla_nn(nn.Module):
         self.fcs.append(LinearLayer(hidden_size, output_size, bias,
                                     use_bn=False, actv_type=None))
 
+
     def forward(self, X):
         for layer in self.fcs:
             X = layer(X)
@@ -91,6 +92,7 @@ class vanilla_nn(nn.Module):
 class prob_nn(nn.Module):
     def __init__(self, input_size=1, output_size=2, bias=True,
                  hidden_size=400, num_layers=4,
+                 adversarial_eps_percent = 1,
                  use_bn=False, actv_type='relu',
                  softmax=False):
 
@@ -107,14 +109,26 @@ class prob_nn(nn.Module):
                                         use_bn=use_bn, actv_type=actv_type))
         self.fcs.append(LinearLayer(hidden_size, output_size, bias,
                                     use_bn=False, actv_type=None))
-        self.max_var = 0
-        self.min_var = float('inf')
+        self.max_var = 1e6
+        self.min_var = 0.0
+        self.adversarial_eps_percent = adversarial_eps_percent
+        self.adversarial_eps = None
 
     def softplus(self, x):
         softplus = torch.log(1+torch.exp(x))
         softplus = torch.where(softplus == float('inf'), x, softplus)
         return softplus
 
+    def determine_adversarial_eps(self, full_train_X):
+        num_features = full_train_X.shape[1]
+        feat_eps_tensor = torch.empty(num_features)
+        for feat_idx in range(num_features):
+            feat_min = torch.min(full_train_X[:,feat_idx], dim=1)
+            feat_max = torch.max(full_train_X[:,feat_idx], dim=1)
+            feat_range = feat_max - feat_min
+            feat_eps = feat_range * self.adversarial_eps_percent / 100.
+            feat_eps_tensor[feat_idx] = feat_eps
+        self.adversarial_eps = feat_eps_tensor
 
     def loss(self, batch_pred, batch_y):
         # import pdb; pdb.set_trace()
@@ -131,8 +145,8 @@ class prob_nn(nn.Module):
                 self.max_var = v
             if v < self.min_var:
                 self.min_var = v
-        loss = torch.mean(torch.div(diff**2, var))
-        loss += torch.mean(torch.log(var))
+        loss = torch.mean(torch.div(diff**2, 2*var))
+        loss += torch.mean(torch.log(var)/2)
 
         # pred_var = torch.clamp(pred_var, min=1e-10)
         # term_1 = torch.log(pred_var)/2
@@ -140,6 +154,49 @@ class prob_nn(nn.Module):
         # loss = torch.mean(term_1 + term_2, dim=0)
 
         return loss
+
+    def gen_adversarial_example(self, batch_X, grad_X):
+        with torch.no_grad():
+            grad_sign = torch.sign(grad_X)
+            adv_ex = batch_X + (self.adversarial_eps * grad_sign)
+        return adv_ex
+
+    def nll_adversarial_loss(self, batch_X, batch_y, optimizer):
+        if self.adversarial_eps is None:
+            raise RuntimeError("Must run 'determine_adversarial_eps' to set eps" )
+
+        # 1. calculate nll loss of original batch_X
+        #    make it a Variable so we can get grad of loss wrt batch_X
+        batch_X = Variable(batch_X)
+        batch_X.requires_grad = True
+
+        # 2. zero out gradients before calculating grad of batch_X
+        optimizer.zero_grad()
+        batch_pred = self.forward(batch_X)
+        nll_loss = self.loss(batch_pred, batch_y)
+        nll_loss.backward()
+        grad_X = batch_X.grad
+
+        # 3. make the adversarial example from batch_X
+        batch_adversarial_example = self.gen_adversarial_example(batch_X, grad_X)
+
+        # 4. no longer need to calculate gradients for batch_X and adversarial batch_X
+        batch_adversarial_example.requires_grad = False
+        batch_X.requires_grad = False
+
+        # 5. calculate nll loss of adversarial batch_X
+        adversarial_batch_pred = self.forward(batch_adversarial_example)
+        adv_nll_loss = self.loss(adversarial_batch_pred, batch_y)
+
+        # 6. zero out gradient before calculating final loss
+        optimizer.zero_grad()
+
+        # final loss
+        batch_loss = nll_loss + adv_nll_loss
+
+        return batch_loss
+
+
 
     def forward(self, X):
         for layer in self.fcs:
